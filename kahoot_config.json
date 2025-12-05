@@ -1,0 +1,6 @@
+{"api_key": "E",
+ "capture_area": [14, 181, 947, 998],
+  "button_coords": {"rojo": [247, 783],
+   "azul": [703, 774], "amarillo": [269, 922],
+    "verde": [694, 909]},
+     "model_name": "wd"}
