@@ -11,3 +11,10 @@ En promedio gemini flash 2.5 tarda de 3-4 seg en responder y 10 milisegundos en 
 1. Descarga `KahootBot-Instalador.zip` y extráelo.
 2. Doble clic en `Instalar.bat` (instala Python si hace falta, las librerías y crea un acceso directo "Kahoot Bot" en el Escritorio).
 3. Abre "Kahoot Bot" desde el Escritorio (pide permisos de administrador para detectar la tecla K).
+
+## Novedades (modo rápido)
+- Usa el SDK nuevo `google-genai` con "thinking" desactivado y la captura reducida: Gemini Flash responde bastante más rápido.
+- Sin pausas artificiales en el click.
+- **Modo AUTO** (casilla o tecla `F8`): detecta cuando aparece una pregunta nueva y responde sola, sin pulsar `K`. Si no hay pregunta en pantalla, no hace nada.
+- Manual sigue funcionando con la tecla `K`.
+- Si ya tenías instalado, vuelve a ejecutar `Instalar.bat` para actualizar las librerías.

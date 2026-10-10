@@ -1,14 +1,29 @@
 import tkinter as tk
 from tkinter import messagebox, scrolledtext, ttk
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import pyautogui
 import keyboard
 import threading
 import time
 import json
+import io
 import os
+import re
 import sys
-from PIL import ImageGrab
+from PIL import ImageGrab, ImageChops, ImageStat
+
+pyautogui.PAUSE = 0          # sin pausa artificial tras cada click
+pyautogui.FAILSAFE = False
+
+MAX_IMG_WIDTH = 900          # imagen más chica = respuesta más rápida
+AUTO_THRESHOLD = 10          # cuánto debe cambiar la pantalla para contar como pregunta nueva
+PROMPT = (
+    "Es una captura de una pregunta de Kahoot con sus opciones de colores "
+    "(ROJO, AZUL, AMARILLO, VERDE). Elige la opción correcta. "
+    "Responde SOLO con una palabra: ROJO, AZUL, AMARILLO o VERDE. "
+    "Si en la imagen NO hay una pregunta con opciones para responder, responde SOLO: NINGUNA."
+)
 
 # Coordenadas correctas en pantallas con escala (125%, 150%...) en Windows
 if sys.platform == "win32":
@@ -45,7 +60,10 @@ class KahootBotApp:
         self.selected_model_name = tk.StringVar()
         self.capture_area = None
         self.button_coords = {"rojo": None, "azul": None, "amarillo": None, "verde": None}
-        self.model = None
+        self.client = None
+        self.model_name = None
+        self.auto_mode = tk.BooleanVar(value=False)
+        self.last_sig = None
         self.is_running = False
 
         # --- ESTILOS TTK (Para el Combobox) ---
@@ -67,6 +85,8 @@ class KahootBotApp:
         # Lógica inicial
         self.load_config()
         keyboard.add_hotkey('k', self.on_hotkey_pressed)
+        keyboard.add_hotkey('f8', lambda: self.root.after(0, self.toggle_auto_hotkey))
+        threading.Thread(target=self.auto_loop, daemon=True).start()
         self.update_ui_status()
         print("--- VENTANA LISTA ---")
 
@@ -131,7 +151,11 @@ class KahootBotApp:
                                                 bg="#000000", fg="#00FF00", insertbackground="white", state='normal')
         self.log_box.pack(fill="both", expand=True, padx=5, pady=5)
 
-        tk.Label(frame, text="Presiona 'K' para activar", bg=COL_BG, fg=COL_ACCENT).pack(pady=5)
+        tk.Checkbutton(frame, text="Modo AUTO (responde solo cuando sale una pregunta nueva)  [F8]",
+                       variable=self.auto_mode, command=self.on_auto_toggle, bg=COL_BG, fg=COL_SUCCESS,
+                       selectcolor=COL_INPUT, activebackground=COL_BG, activeforeground=COL_SUCCESS,
+                       font=("Arial", 8, "bold")).pack(pady=(5, 0))
+        tk.Label(frame, text="Manual: presiona 'K'", bg=COL_BG, fg=COL_ACCENT).pack(pady=5)
 
     # --- FUNCIONES ---
 
@@ -171,7 +195,7 @@ class KahootBotApp:
         if self.capture_area: self.lbl_area.config(text=f"✔ Área OK", fg=COL_SUCCESS)
         if all(self.button_coords.values()): self.lbl_buttons.config(text="✔ Botones OK", fg=COL_SUCCESS)
         
-        if self.model and self.capture_area and all(self.button_coords.values()):
+        if self.client and self.capture_area and all(self.button_coords.values()):
             self.lbl_status.config(text="LISTO (K)", fg=COL_SUCCESS)
         else:
             self.lbl_status.config(text="CONFIGURAR", fg="orange")
@@ -182,8 +206,8 @@ class KahootBotApp:
         
         self.log("Buscando modelos...")
         try:
-            genai.configure(api_key=key)
-            models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+            client = genai.Client(api_key=key)
+            models = [m.name for m in client.models.list() if 'generateContent' in (m.supported_actions or [])]
             self.combo_models['values'] = models
             if models: 
                 self.combo_models.set(models[0])
@@ -200,14 +224,24 @@ class KahootBotApp:
 
     def connect_model(self, model_name):
         try:
-            genai.configure(api_key=self.api_key.get())
-            self.model = genai.GenerativeModel(model_name=model_name, generation_config={"temperature": 0.0})
+            client = genai.Client(api_key=self.api_key.get().strip())
+            name = model_name if model_name.startswith("models/") else f"models/{model_name}"
+            client.models.generate_content(model=name, contents="ok",
+                                           config=self.make_config())  # calienta la conexión
+            self.client, self.model_name = client, name
             self.log(f"Conectado a: {model_name}")
             self.save_config()
             self.update_ui_status()
         except Exception as e:
             self.log(f"Fallo conexión: {e}")
             messagebox.showerror("Error", str(e))
+
+    def make_config(self, thinking=True):
+        kw = dict(temperature=0.0, max_output_tokens=64)
+        # Sin "pensar" Gemini responde mucho más rápido (solo modelos que lo permiten)
+        if thinking and "2.5" in (self.selected_model_name.get() or "") and "pro" not in self.selected_model_name.get():
+            kw["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+        return types.GenerateContentConfig(**kw)
 
     # --- CALIBRACIÓN VISUAL ---
     def start_area_selection(self):
@@ -260,41 +294,85 @@ class KahootBotApp:
 
     # --- PROCESO ---
     def on_hotkey_pressed(self):
-        if self.is_running or not self.model: return
+        if self.is_running or not self.client: return
         # No disparar si se está escribiendo la letra "k" en un campo de texto
         if isinstance(self.root.focus_get(), (tk.Entry, ttk.Combobox, tk.Text)): return
-        threading.Thread(target=self.process).start()
+        threading.Thread(target=self.process, daemon=True).start()
+
+    def on_auto_toggle(self):
+        if self.auto_mode.get() and not (self.client and self.capture_area and all(self.button_coords.values())):
+            self.auto_mode.set(False)
+            return messagebox.showwarning("Falta configurar", "Conecta el modelo y calibra área y botones primero.")
+        self.last_sig = None
+        self.log("Modo AUTO " + ("ACTIVADO" if self.auto_mode.get() else "desactivado"))
+
+    def toggle_auto_hotkey(self):
+        self.auto_mode.set(not self.auto_mode.get())
+        self.on_auto_toggle()
+
+    @staticmethod
+    def signature(img):
+        return img.convert("L").resize((48, 48))
+
+    def auto_loop(self):
+        """Vigila el área: cuando aparece una pregunta nueva y se estabiliza, responde sola."""
+        prev = None
+        while True:
+            time.sleep(0.2)
+            try:
+                if not (self.auto_mode.get() and self.client and self.capture_area) or self.is_running:
+                    prev = None
+                    continue
+                sig = self.signature(ImageGrab.grab(bbox=self.capture_area))
+                stable = prev is not None and ImageStat.Stat(ImageChops.difference(sig, prev)).mean[0] < 2
+                prev = sig
+                new_q = self.last_sig is None or ImageStat.Stat(ImageChops.difference(sig, self.last_sig)).mean[0] > AUTO_THRESHOLD
+                # contenido "con algo": evita responder a una pantalla casi uniforme
+                if stable and new_q and ImageStat.Stat(sig).stddev[0] > 15:
+                    self.last_sig = sig
+                    self.process()
+            except Exception as e:
+                self.root.after(0, lambda e=e: self.log(f"Auto err: {e}"))
 
     def process(self):
         self.is_running = True
         self.root.after(0, lambda: self.lbl_status.config(text="⌛ ...", fg=COL_SUCCESS))
         try:
-            img = ImageGrab.grab(bbox=self.capture_area)
             t0 = time.time()
-            res = self.model.generate_content(["Responde SOLO: ROJO, AZUL, AMARILLO, VERDE.", img])
-            txt = res.text.strip().upper()
+            img = ImageGrab.grab(bbox=self.capture_area).convert("RGB")
+            if img.width > MAX_IMG_WIDTH:
+                img = img.resize((MAX_IMG_WIDTH, int(img.height * MAX_IMG_WIDTH / img.width)))
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=80)
+            parts = [types.Part.from_bytes(data=buf.getvalue(), mime_type="image/jpeg"), PROMPT]
+
+            try:
+                res = self.client.models.generate_content(model=self.model_name, contents=parts, config=self.make_config())
+            except Exception:
+                # reintento sin opciones especiales (por si el modelo no admite thinking_config)
+                res = self.client.models.generate_content(model=self.model_name, contents=parts, config=self.make_config(thinking=False))
+            txt = (res.text or "").strip().upper()
             dt = time.time() - t0
-            
+
             self.root.after(0, lambda: self.log(f"🤖 ({dt:.2f}s): {txt}"))
-            
-            detected = None
-            if "ROJO" in txt: detected = "rojo"
-            elif "AZUL" in txt: detected = "azul"
-            elif "AMARILLO" in txt: detected = "amarillo"
-            elif "VERDE" in txt: detected = "verde"
-            
+
+            m = re.search(r"ROJO|AZUL|AMARILLO|VERDE", txt)
+            detected = m.group(0).lower() if m else None
+
             if detected and self.button_coords[detected]:
+                x, y = self.button_coords[detected]
+                pyautogui.click(x, y)
                 self.root.after(0, lambda: self.lbl_status.config(text=f"CLICK {detected.upper()}", fg=COL_ACCENT))
-                pyautogui.click(self.button_coords[detected])
             else:
-                self.root.after(0, lambda: self.lbl_status.config(text="?", fg=COL_WARN))
-                
+                shown = "…" if "NINGUNA" in txt else "?"
+                self.root.after(0, lambda: self.lbl_status.config(text=shown, fg=COL_WARN))
+
         except Exception as e:
-            self.root.after(0, lambda: self.log(f"Err: {e}"))
+            self.root.after(0, lambda e=e: self.log(f"Err: {e}"))
         finally:
-            self.is_running = False
             time.sleep(0.5)
-            if self.model: self.root.after(0, lambda: self.lbl_status.config(text="LISTO (K)", fg=COL_SUCCESS))
+            self.is_running = False
+            if self.client: self.root.after(0, lambda: self.lbl_status.config(text="LISTO (K)", fg=COL_SUCCESS))
 
 if __name__ == "__main__":
     try:
