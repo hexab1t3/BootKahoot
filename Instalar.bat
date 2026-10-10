@@ -9,12 +9,12 @@ echo    INSTALADOR - KAHOOT BOT
 echo ==============================================
 echo.
 
-REM --- 1. Buscar Python ---
+REM --- 1. Buscar un Python que FUNCIONE (ignora el atajo falso de Microsoft Store) ---
 set "PY="
-where py >nul 2>nul && set "PY=py -3"
-if not defined PY (
-    where python >nul 2>nul && set "PY=python"
-)
+call :trypy py -3
+if not defined PY call :trypy python
+if not defined PY call :trypy ""%LOCALAPPDATA%\Programs\Python\Python312\python.exe""
+if not defined PY call :trypy ""%LOCALAPPDATA%\Programs\Python\Python313\python.exe""
 
 if not defined PY (
     echo [1/4] Python no encontrado. Instalando Python 3.12...
@@ -28,15 +28,14 @@ if not defined PY (
         exit /b 1
     )
     winget install -e --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
-    set "PY=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
-    if not exist "!PY!" (
+    call :trypy ""%LOCALAPPDATA%\Programs\Python\Python312\python.exe""
+    if not defined PY (
         echo.
         echo Python se instalo pero hay que reiniciar este instalador.
         echo Cierra esta ventana y haz doble clic en Instalar.bat otra vez.
         pause
         exit /b 1
     )
-    set "PY="!PY!""
 ) else (
     echo [1/4] Python encontrado.
 )
@@ -72,3 +71,8 @@ echo.
 echo *** Hubo un error en la instalacion. Revisa los mensajes de arriba. ***
 pause
 exit /b 1
+
+:trypy
+%* -c "import venv, sys; sys.exit(0 if sys.version_info >= (3,9) else 1)" >nul 2>nul
+if not errorlevel 1 set "PY=%*"
+exit /b 0
