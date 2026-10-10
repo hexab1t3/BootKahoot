@@ -13,8 +13,8 @@ REM --- 1. Buscar un Python que FUNCIONE (ignora el atajo falso de Microsoft Sto
 set "PY="
 call :trypy py -3
 if not defined PY call :trypy python
-if not defined PY call :trypy ""%LOCALAPPDATA%\Programs\Python\Python312\python.exe""
-if not defined PY call :trypy ""%LOCALAPPDATA%\Programs\Python\Python313\python.exe""
+if not defined PY call :trypy "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+if not defined PY call :trypy "%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
 
 if not defined PY (
     echo [1/4] Python no encontrado. Instalando Python 3.12...
@@ -28,7 +28,7 @@ if not defined PY (
         exit /b 1
     )
     winget install -e --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
-    call :trypy ""%LOCALAPPDATA%\Programs\Python\Python312\python.exe""
+    call :trypy "%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
     if not defined PY (
         echo.
         echo Python se instalo pero hay que reiniciar este instalador.
