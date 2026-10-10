@@ -7,11 +7,20 @@ import threading
 import time
 import json
 import os
+import sys
 from PIL import ImageGrab
+
+# Coordenadas correctas en pantallas con escala (125%, 150%...) en Windows
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        pass
 
 print("--- INICIANDO EL PROGRAMA (DARK MODE) ---")
 
-CONFIG_FILE = "kahoot_config.json"
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kahoot_config.json")
 
 # --- PALETA DE COLORES ---
 COL_BG = "#121212"        # Fondo principal (Casi negro)
@@ -146,7 +155,7 @@ class KahootBotApp:
                     saved_model = data.get("model_name", "")
                     if saved_model:
                         self.selected_model_name.set(saved_model)
-            except: pass
+            except Exception: pass
 
     def save_config(self):
         data = {
@@ -156,7 +165,7 @@ class KahootBotApp:
             "model_name": self.selected_model_name.get()
         }
         with open(CONFIG_FILE, 'w') as f:
-            json.dump(data, f)
+            json.dump(data, f, indent=2)
 
     def update_ui_status(self):
         if self.capture_area: self.lbl_area.config(text=f"✔ Área OK", fg=COL_SUCCESS)
@@ -252,6 +261,8 @@ class KahootBotApp:
     # --- PROCESO ---
     def on_hotkey_pressed(self):
         if self.is_running or not self.model: return
+        # No disparar si se está escribiendo la letra "k" en un campo de texto
+        if isinstance(self.root.focus_get(), (tk.Entry, ttk.Combobox, tk.Text)): return
         threading.Thread(target=self.process).start()
 
     def process(self):
