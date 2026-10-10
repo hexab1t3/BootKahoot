@@ -5,3 +5,9 @@ despues tendras que mapear la pantalla donde muestran preguntas y opciones, y ma
 te dira la interfaz el orden. Despues de eso solo debes esperar a que aparesca la pregunta y opciones y presionar la tecla " K " y el boot se encargara 
 de enviar la imagen a gemini y dar click automaticamente a la respuesta. 
 En promedio gemini flash 2.5 tarda de 3-4 seg en responder y 10 milisegundos en dar click o menos; si lo que buscas es rapidez
+
+
+## Instalación (Windows)
+1. Descarga `KahootBot-Instalador.zip` y extráelo.
+2. Doble clic en `Instalar.bat` (instala Python si hace falta, las librerías y crea un acceso directo "Kahoot Bot" en el Escritorio).
+3. Abre "Kahoot Bot" desde el Escritorio (pide permisos de administrador para detectar la tecla K).
